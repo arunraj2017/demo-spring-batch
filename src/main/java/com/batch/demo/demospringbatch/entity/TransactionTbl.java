@@ -18,6 +18,6 @@ public class TransactionTbl {
     @NonNull private String accountType;
     @NonNull private LocalDateTime transactionDate;
     @NonNull private int amount;
-    private boolean isLienReleased;
+    private boolean isLienReleased=false;
     private boolean isProcessed=false;
 }

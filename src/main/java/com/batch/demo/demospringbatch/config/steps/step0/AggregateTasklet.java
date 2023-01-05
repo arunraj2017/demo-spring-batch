@@ -4,6 +4,7 @@ import com.batch.demo.demospringbatch.dao.AggregateTableRepository;
 import com.batch.demo.demospringbatch.dao.TransactionRepository;
 import com.batch.demo.demospringbatch.entity.AggregateTbl;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.batch.core.StepContribution;
 import org.springframework.batch.core.scope.context.ChunkContext;
 import org.springframework.batch.core.step.tasklet.Tasklet;
@@ -17,6 +18,7 @@ import java.util.List;
  * **/
 @Component
 @RequiredArgsConstructor
+@Slf4j
 public class AggregateTasklet implements Tasklet {
 
     private final TransactionRepository transactionRepository;
@@ -34,7 +36,7 @@ public class AggregateTasklet implements Tasklet {
         for (Object[] obj: result) {
             AggregateTbl aggregateTbl = new AggregateTbl();
             aggregateTbl.setAccountNumber((Integer) obj[0]);
-            aggregateTbl.setTotal((Integer) obj[1]);
+            aggregateTbl.setTotal(((Long) obj[1]).intValue());
             resultList.add(aggregateTbl);
         }
         return resultList;

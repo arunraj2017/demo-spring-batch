@@ -3,7 +3,9 @@ package com.batch.demo.demospringbatch.controller;
 import lombok.AllArgsConstructor;
 import org.springframework.batch.core.Job;
 import org.springframework.batch.core.JobParameters;
+import org.springframework.batch.core.JobParametersBuilder;
 import org.springframework.batch.core.launch.JobLauncher;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -18,7 +20,10 @@ public class BatchController {
     private final JobLauncher jobLauncher;
     @PostMapping("/start")
     public ResponseEntity startJob() throws Exception{
-        this.jobLauncher.run(this.batchJob, new JobParameters());
+        final JobParameters jobParameters = new JobParametersBuilder()
+                .addLong("run.id",System.currentTimeMillis()).toJobParameters();
+
+        this.jobLauncher.run(this.batchJob,jobParameters);
         return ResponseEntity.status(HttpStatus.CREATED).body(null);
     }
 

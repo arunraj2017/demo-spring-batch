@@ -1,17 +1,19 @@
 package com.batch.demo.demospringbatch.config;
 
 import com.batch.demo.demospringbatch.config.steps.step0.AggregateTasklet;
+import com.batch.demo.demospringbatch.config.steps.step1.AggregateTableRowMapper;
+import com.batch.demo.demospringbatch.config.steps.step1.BatchDataProcessor;
+import com.batch.demo.demospringbatch.config.steps.step1.TxnItemWriter;
+import com.batch.demo.demospringbatch.config.steps.step2.ClearAggregateTableTasklet;
 import com.batch.demo.demospringbatch.entity.ResultTbl;
 import com.batch.demo.demospringbatch.entity.TransactionTbl;
 import jakarta.persistence.EntityManager;
-import jakarta.persistence.PersistenceContext;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.batch.core.Job;
 import org.springframework.batch.core.Step;
 import org.springframework.batch.core.job.builder.JobBuilder;
-import org.springframework.batch.core.launch.JobLauncher;
-import org.springframework.batch.core.launch.support.TaskExecutorJobLauncher;
+import org.springframework.batch.core.launch.support.RunIdIncrementer;
 import org.springframework.batch.core.repository.JobRepository;
 import org.springframework.batch.core.step.builder.StepBuilder;
 import org.springframework.batch.item.ItemProcessor;
@@ -21,113 +23,98 @@ import org.springframework.batch.item.database.builder.JdbcCursorItemReaderBuild
 import org.springframework.batch.item.database.builder.JpaItemWriterBuilder;
 import org.springframework.batch.item.support.SynchronizedItemStreamReader;
 import org.springframework.batch.item.support.builder.SynchronizedItemStreamReaderBuilder;
-import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.core.task.SimpleAsyncTaskExecutor;
 import org.springframework.core.task.TaskExecutor;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import org.springframework.transaction.PlatformTransactionManager;
 
 import javax.sql.DataSource;
+import java.util.List;
 
 @Slf4j
 @RequiredArgsConstructor
 @Configuration
 public class BatchConfig {
 
-    private final JobRepository jobRepository;
-    private final PlatformTransactionManager transactionManager;
-
-    private final AggregateTasklet aggregateTasklet;
-    @Autowired
-    private final DataSource dataSource;
-
-    @PersistenceContext
-    private EntityManager em;
-
-   /* @Bean
-    public JpaCursorItemReader<TransactionTbl> itemReader() {
-        JpaCursorItemReader<TransactionTbl> reader = new JpaCursorItemReader<>();
-        reader.setName("JpaItemReader");
-        reader.setEntityManagerFactory(em.getEntityManagerFactory());
-        reader.setName("Datasource cursor item reader");
-        reader.setQueryString("from TransactionTbl");
-        reader.setSaveState(true);
-        return reader;
-    }*/
-
     @Bean
-    public JdbcCursorItemReader itemReader2() {
-        return new JdbcCursorItemReaderBuilder()
-                .dataSource(this.dataSource)
-                .sql("SELECT ID, ACCOUNT_NUMBER, ACCOUNT_TYPE, AMOUNT,TRANSACTION_DATE,IS_LIEN_RELEASED FROM TRANSACTION_TBL")
-                .name("ItemReader2")
-                .rowMapper(new TransactionTblRowMapper())
-                //.fetchSize(4)
-                .saveState(false)
-                //.verifyCursorPosition(false)
-                .build();
-    }
-    @Bean
-    public SynchronizedItemStreamReader itemReader() {
-        return new SynchronizedItemStreamReaderBuilder().delegate(itemReader2()).build();
-    }
-
-    @Bean
-    public JpaItemWriter<ResultTbl> itemWriter() {
-        return new JpaItemWriterBuilder<ResultTbl>()
+    public JpaItemWriter<List<TransactionTbl>> itemWriter(EntityManager em) {
+        return new JpaItemWriterBuilder<List<TransactionTbl>>()
                 .entityManagerFactory(em.getEntityManagerFactory())
                 .build();
 
     }
+
 
     @Bean
     public ItemProcessor<TransactionTbl,ResultTbl> itemProcessor () {
         return new TransactionProcessor();
     }
 
+
+
+    /*new step builder start*/
     @Bean
-    public Step step1() {
-        return new StepBuilder("step1",this.jobRepository)
-                .<TransactionTbl,ResultTbl> chunk(5,this.transactionManager)
-                .reader(itemReader())
-                .processor(itemProcessor())
-                .writer(itemWriter())
-                .taskExecutor(taskExecutor())
+    public Job groupingAndProcessingJob(Step step0, Step step1, Step step2, JobRepository jobRepository) {
+        return new JobBuilder("group and process", jobRepository)
+                .start(step0)
+                .next(step1)
+                .next(step2)
+                .incrementer(new RunIdIncrementer()) //TODO: Test validity
+                .build();
+    }
+    @Bean
+   public Step step0(JobRepository jobRepository, AggregateTasklet aggregateTasklet, PlatformTransactionManager transactionManager) {
+       return new StepBuilder("step0: populate aggregate table", jobRepository)
+               .tasklet(aggregateTasklet,transactionManager)
+               .build();
+   }
+
+   @Bean
+   public Step step1(JobRepository jobRepository, BatchDataProcessor batchDataProcessor, TxnItemWriter txnItemWriter, PlatformTransactionManager transactionManager, @Qualifier("aggregateItemReader") SynchronizedItemStreamReader aggregateItemReader){
+       return new StepBuilder("step1: read from aggregateTable", jobRepository)
+               .<int[],List<TransactionTbl>>chunk(1,transactionManager)
+               .reader(aggregateItemReader)
+               .processor(batchDataProcessor)
+               .writer(txnItemWriter)
+               .taskExecutor(taskExecutor())
+               .build();
+   }
+
+   @Bean
+   public Step step2(JobRepository jobRepository, ClearAggregateTableTasklet clearTableTasklet, PlatformTransactionManager transactionManager){
+       return new StepBuilder("step2: clear tables", jobRepository)
+               .tasklet(clearTableTasklet, transactionManager)
+               .build();
+   }
+
+
+    @Bean
+    public JdbcCursorItemReader aggregateTableReader(DataSource dataSource, AggregateTableRowMapper aggregateRowMapper) {
+        return new JdbcCursorItemReaderBuilder()
+                .dataSource(dataSource)
+                .sql("SELECT ACCOUNT_NUMBER,TOTAL FROM AGGREGATE_TBL")
+                .name("aggregateReader")
+                .rowMapper(aggregateRowMapper)
+                .saveState(false)
                 .build();
     }
 
 
     @Bean
-    public Job doTransactionJob( Step step1) {
-        return new JobBuilder("doTransactionJob",this.jobRepository)
-                //.flow(step1).end().build();
-               .start(step1).build();
+    public SynchronizedItemStreamReader aggregateItemReader(@Qualifier("aggregateTableReader") JdbcCursorItemReader aggregateTableReader) {
+        return new SynchronizedItemStreamReaderBuilder().delegate(aggregateTableReader).build();
     }
 
-
-    /*new step builder*/
-   public Step newSteps() {
-       return new StepBuilder("step0", this.jobRepository)
-               .tasklet(this.aggregateTasklet,this.transactionManager)
-               .build();
-   }
-
-    @Bean
-    public JobLauncher jobLauncher() {
-        TaskExecutorJobLauncher jobLauncher  = new TaskExecutorJobLauncher();
-        jobLauncher.setJobRepository(this.jobRepository);
-        jobLauncher.setTaskExecutor(new SimpleAsyncTaskExecutor());
-        return jobLauncher;
-    }
+   /*mew step builder end*/
 
     @Bean
     public TaskExecutor taskExecutor() {
         ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
-        executor.setCorePoolSize(64);
-        executor.setMaxPoolSize(64);
-        executor.setQueueCapacity(64);
+        executor.setCorePoolSize(3);
+        executor.setMaxPoolSize(5);
+        executor.setQueueCapacity(10);
         //executor.setRejectedExecutionHandler(new ThreadPoolExecutor().CallerRunsPolicy());
         executor.setThreadNamePrefix("MultiThreaded-");
         return executor;
