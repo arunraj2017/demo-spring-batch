@@ -10,7 +10,6 @@ import org.springframework.stereotype.Component;
 
 import java.util.List;
 
-@Component
 @Slf4j
 @RequiredArgsConstructor
 public class TxnItemWriter implements ItemWriter<List<TransactionTbl>> {

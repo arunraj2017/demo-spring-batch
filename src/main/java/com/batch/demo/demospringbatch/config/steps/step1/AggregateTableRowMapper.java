@@ -16,30 +16,25 @@ import java.util.List;
 @Component
 @RequiredArgsConstructor
 @Slf4j
-public class AggregateTableRowMapper implements RowMapper<List<TransactionTbl>> {
+public class AggregateTableRowMapper implements RowMapper<TransactionDto> {
 
     private static String ACCT_NBR="ACCOUNT_NUMBER";
     private static String AMOUNT = "AMOUNT_SUM";
 
     private final TransactionRepository transactionRepo;
     @Override
-    public List<TransactionTbl> mapRow(ResultSet rs, int rowNum) throws SQLException {
+    public TransactionDto mapRow(ResultSet rs, int rowNum) throws SQLException {
         log.info("Mapping resultset , ThreadId: {}, ThreadName: {}", Thread.currentThread().getId(), Thread.currentThread().getName());
         int accountNumber = rs.getInt("ACCOUNT_NUMBER");
         int total = rs.getInt("TOTAL");
 
-        List<TransactionTbl> transactions = null;
         //Get account balance here and decide on going forward or not;
-        transactions = transactionRepo.getTransactionListByAccountNumber(accountNumber);
-        if(accountNumber!=1009) {
-            for(TransactionTbl txn: transactions){
-               txn.setProcessed(true);
-           }
-            transactionRepo.saveAll(transactions);
-        }else{
-            transactions = null;
-        }
+        List<TransactionTbl> transactions = transactionRepo.getTransactionListByAccountNumber(accountNumber);
 
-        return transactions;
+        return TransactionDto.builder()
+                .transactions(transactions)
+                .accountNumber(accountNumber)
+                .prtBalance(total)
+                .build();
     }
 }
